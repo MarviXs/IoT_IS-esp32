@@ -17,11 +17,10 @@ static const char *TAG = "SHT41";
 
 void readSHT41(void *parameter)
 {
-    float temperature = 0.0;
-    float humidity = 0.0;
     while (true)
     {
-        error = sht41.measureHighPrecision(temperature, humidity);
+        vTaskDelay(1000 / portTICK_PERIOD_MS);
+        error = sht41.measureHighPrecision(sht_41_temperature, sht_41_humidity);
         if (error != NO_ERROR)
         {
             errorToString(error, errorMessage, sizeof errorMessage);
@@ -29,14 +28,14 @@ void readSHT41(void *parameter)
         }
         else
         {
-            ESP_LOGI(TAG, "Temperature: %.2f °C, Humidity: %.2f %%", temperature, humidity);
+            ESP_LOGI(TAG, "Temperature: %.2f °C, Humidity: %.2f %%", sht_41_temperature, sht_41_humidity);
 
-            iotIs.send_data("temp", temperature);
-            iotIs.send_data("hum", humidity);
-
-            vTaskDelay(2000 / portTICK_PERIOD_MS);
+            iotIs.send_data("temp", sht_41_temperature);
+            iotIs.send_data("hum", sht_41_humidity);
         }
     }
+
+    vTaskDelete(NULL);
 }
 
 void initSHT41()

@@ -4,11 +4,12 @@
 #include "iot_is.h"
 #include "job_manager.h"
 #include "esp_log.h"
-#include "wifi_connection.h"
-#include "sntp.h"
+#include "utils/wifi_connection.h"
+#include "utils/sntp.h"
 #include <Wire.h>
-#include "scd41.h"
-#include "sht41.h"
+#include "sensors/scd41.h"
+#include "sensors/sht41.h"
+#include "sensors/sgp41.h"
 
 #define LED_PIN 4
 
@@ -66,6 +67,7 @@ void setup()
 
     initSHT41();
     initSCD41();
+    initSGP41();
 
     iotIs.connect(accessToken, mqttHost, mqttPort);
 }

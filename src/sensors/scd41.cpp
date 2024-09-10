@@ -17,7 +17,7 @@ void readSCD41(void *parameter)
     bool isDataReady = false;
     while (true)
     {
-        vTaskDelay(2000 / portTICK_PERIOD_MS);
+        vTaskDelay(1000 / portTICK_PERIOD_MS);
         error = scd41.getDataReadyFlag(isDataReady);
         if (error)
         {
@@ -46,6 +46,8 @@ void readSCD41(void *parameter)
             }
         }
     }
+
+    vTaskDelete(NULL);
 }
 
 void initSCD41()
@@ -71,6 +73,8 @@ void initSCD41()
         ESP_LOGE(TAG, "Error trying to get scd41 serial number: %s", errorMessage);
         return;
     }
+
+    scd41.setSensorAltitude(148);
     error = scd41.startPeriodicMeasurement();
     if (error)
     {
