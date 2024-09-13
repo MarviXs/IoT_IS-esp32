@@ -6,5 +6,6 @@
 
 void initSCD41();
 void readSCD41(void *parameter);
+bool forceSCD41Recalibration();
 
 #endif

@@ -11,13 +11,13 @@
 #include "sensors/sht41.h"
 #include "sensors/sgp41.h"
 
-#define LED_PIN 4
+#define LED_PIN 2
 
-const char *ssid = "Wokwi-GUEST";
+const char *ssid = "";
 const char *password = "";
 
 const std::string accessToken = "6iZUHMw5ct3rCMw9k7INpivJ";
-const std::string mqttHost = "192.168.1.166";
+const std::string mqttHost = "";
 const int mqttPort = 1883;
 
 static const char *TAG = "main";
@@ -56,6 +56,7 @@ void setup()
     job_manager.init();
     job_manager.register_command("delay", delayCommand);
     job_manager.register_command("toggle_led", toggleLed);
+    job_manager.register_command("force_scd41_recalibration", forceSCD41Recalibration);
 
     start_wifi_connection(ssid, password);
     while (WiFi.status() != WL_CONNECTED)

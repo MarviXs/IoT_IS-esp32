@@ -17,7 +17,8 @@ public:
     JobManager();
     void init();
     void register_command(const std::string &name, CommandFunction func);
-    
+    void register_command(const std::string &name, std::function<bool()> func);
+
     bool start_job(JobFlatBuffers::JobT &job);
 
     void pause_job(const std::string &job_id);

@@ -226,18 +226,22 @@ void JobManager::execute_job_task(const std::string &job_id)
                 notify_job_update(job);
                 return;
             }
-            
-            if (job.current_step == job.total_steps && job.current_cycle == job.total_cycles) {
+
+            if (job.current_step == job.total_steps && job.current_cycle == job.total_cycles)
+            {
                 break;
             }
             job.current_step++;
             notify_job_update(job);
         }
-        
-        if (job.current_cycle < job.total_cycles) {
+
+        if (job.current_cycle < job.total_cycles)
+        {
             job.current_cycle++;
             job.current_step = 1;
-        } else {
+        }
+        else
+        {
             break;
         }
     }
@@ -250,13 +254,13 @@ void JobManager::execute_job_task(const std::string &job_id)
 
     ESP_LOGI(TAG, "Job %s finished", job.name.c_str());
     notify_job_update(job);
+    active_jobs.erase(job_id);
 
     if (job_task_handles.find(job_id) != job_task_handles.end())
     {
+        job_task_handles.erase(job_id);
         vTaskDelete(job_task_handles[job_id]);
     }
-    job_task_handles.erase(job_id);
-    active_jobs.erase(job_id);
 }
 
 // Update execute_command to use the job ID
@@ -288,6 +292,11 @@ bool JobManager::execute_command(const std::string &job_id)
 }
 
 void JobManager::register_command(const std::string &name, CommandFunction func)
+{
+    command_registry.register_command(name, func);
+}
+
+void JobManager::register_command(const std::string &name, std::function<bool()> func)
 {
     command_registry.register_command(name, func);
 }

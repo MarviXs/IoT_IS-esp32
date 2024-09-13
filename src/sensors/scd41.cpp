@@ -50,6 +50,26 @@ void readSCD41(void *parameter)
     vTaskDelete(NULL);
 }
 
+bool forceSCD41Recalibration()
+{
+    scd41.stopPeriodicMeasurement();
+    vTaskDelay(pdMS_TO_TICKS(500));
+
+    uint16_t frcCorrection = 0;
+    error = scd41.performForcedRecalibration(420, frcCorrection);
+    if (error)
+    {
+        errorToString(error, errorMessage, sizeof errorMessage);
+        ESP_LOGE(TAG, "Error trying to recalibrate: %s", errorMessage);
+        scd41.startPeriodicMeasurement();
+        return false;
+    }
+
+    ESP_LOGI(TAG, "Forced recalibration successful. Correction value: %d", frcCorrection);
+    scd41.startPeriodicMeasurement();
+    return true;
+}
+
 void initSCD41()
 {
     scd41.begin(Wire);
