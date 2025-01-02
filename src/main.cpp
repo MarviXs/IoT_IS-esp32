@@ -66,7 +66,7 @@ void setup()
 
     initSNTP(10 * 60 * 1000);
 
-    initSHT41();
+    // initSHT41();
     initSCD41();
     initSGP41();
 
@@ -77,3 +77,4 @@ void loop()
 {
     vTaskDelay(1000);
 }
+

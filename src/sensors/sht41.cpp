@@ -19,7 +19,7 @@ void readSHT41(void *parameter)
 {
     while (true)
     {
-        vTaskDelay(1000 / portTICK_PERIOD_MS);
+        vTaskDelay(15000 / portTICK_PERIOD_MS);
         error = sht41.measureHighPrecision(sht_41_temperature, sht_41_humidity);
         if (error != NO_ERROR)
         {

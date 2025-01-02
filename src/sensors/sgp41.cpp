@@ -30,7 +30,7 @@ void readSGP41(void *parameter)
     int32_t IndexNox = 0;
     while (true)
     {
-        vTaskDelay(1000 / portTICK_PERIOD_MS);
+        vTaskDelay(15000 / portTICK_PERIOD_MS);
 
         float humidityTicks = (sht_41_humidity == 0) ? defaultRh : sht_41_humidity * 65535 / 100;
         float temperatureTicks = (sht_41_temperature == 0) ? defaultT : (sht_41_temperature + 45) * 65535 / 175;

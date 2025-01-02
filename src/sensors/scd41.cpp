@@ -17,7 +17,7 @@ void readSCD41(void *parameter)
     bool isDataReady = false;
     while (true)
     {
-        vTaskDelay(1000 / portTICK_PERIOD_MS);
+        vTaskDelay(15000 / portTICK_PERIOD_MS);
         error = scd41.getDataReadyFlag(isDataReady);
         if (error)
         {
@@ -41,8 +41,8 @@ void readSCD41(void *parameter)
                 ESP_LOGI(TAG, "CO2 level: %d ppm", co2);
 
                 iotIs.send_data("co2", co2);
-                iotIs.send_data("temp2", temperature);
-                iotIs.send_data("hum2", humidity);
+                iotIs.send_data("temp", temperature);
+                iotIs.send_data("hum", humidity);
             }
         }
     }
@@ -56,7 +56,7 @@ bool forceSCD41Recalibration()
     vTaskDelay(pdMS_TO_TICKS(500));
 
     uint16_t frcCorrection = 0;
-    error = scd41.performForcedRecalibration(420, frcCorrection);
+    error = scd41.performForcedRecalibration(425, frcCorrection);
     if (error)
     {
         errorToString(error, errorMessage, sizeof errorMessage);
