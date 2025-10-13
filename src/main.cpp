@@ -29,6 +29,7 @@ bool toggleLed(const std::vector<double> &params)
     bool state = (params[0] == 1);
     digitalWrite(LED_PIN, state);
     ESP_LOGI(TAG, "LED on pin %d turned %s.", LED_PIN, state ? "ON" : "OFF");
+    iotIs.send_data("led", state ? 1 : 0);
     return true;
 }
 
@@ -56,7 +57,7 @@ void setup()
     job_manager.init();
     job_manager.register_command("delay", delayCommand);
     job_manager.register_command("toggle_led", toggleLed);
-    job_manager.register_command("force_scd41_recalibration", forceSCD41Recalibration);
+    // job_manager.register_command("force_scd41_recalibration", forceSCD41Recalibration);
 
     start_wifi_connection(ssid, password);
     while (WiFi.status() != WL_CONNECTED)
@@ -67,8 +68,8 @@ void setup()
     initSNTP(10 * 60 * 1000);
 
     // initSHT41();
-    initSCD41();
-    initSGP41();
+    // initSCD41();
+    // initSGP41();
 
     iotIs.connect(accessToken, mqttHost, mqttPort);
 }
