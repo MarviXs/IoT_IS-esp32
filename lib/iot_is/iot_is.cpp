@@ -10,7 +10,7 @@
 #define TAG "IoTIs"
 
 IoTIs::IoTIs()
-    : _accessToken(""), _mqttHost(""), _mqttPort(0), _mqttClient(nullptr)
+    : _accessToken(""), _mqttHost(""), _mqttPort(0), _mqttClient(nullptr), isConnected(false)
 {
 }
 
@@ -21,6 +21,7 @@ IoTIs::~IoTIs()
         esp_mqtt_client_stop(_mqttClient);
         esp_mqtt_client_destroy(_mqttClient);
     }
+    isConnected = false;
 }
 
 void IoTIs::connect(const std::string &accessToken, const std::string &mqttHost, int mqttPort)
@@ -28,6 +29,7 @@ void IoTIs::connect(const std::string &accessToken, const std::string &mqttHost,
     _accessToken = accessToken;
     _mqttHost = mqttHost;
     _mqttPort = mqttPort;
+    isConnected = false;
 
     xTaskCreate(&IoTIs::connect_task, "connect_task", 4096, this, 5, NULL);
 }
@@ -85,10 +87,16 @@ void IoTIs::mqtt_event_handler(void *handler_args, esp_event_base_t base, int32_
     {
     case MQTT_EVENT_CONNECTED:
         ESP_LOGI(TAG, "MQTT_EVENT_CONNECTED");
+        instance->isConnected = true;
         instance->on_connected();
         break;
     case MQTT_EVENT_DISCONNECTED:
         ESP_LOGI(TAG, "MQTT_EVENT_DISCONNECTED");
+        instance->isConnected = false;
+        break;
+    case MQTT_EVENT_ERROR:
+        ESP_LOGI(TAG, "MQTT_EVENT_ERROR");
+        instance->isConnected = false;
         break;
     case MQTT_EVENT_DATA:
         instance->on_data_received(event);

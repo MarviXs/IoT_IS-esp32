@@ -17,6 +17,9 @@ public:
     bool send_data(const std::string &tag, double value, int64_t ts);
     bool update_job_status(JobFlatBuffers::JobT &job);
 
+    // MQTT connection state: true after successful connect, false on failure/disconnect
+    bool isConnected;
+
     using JobReceivedCallback = std::function<void(JobFlatBuffers::JobT &)>;
     using JobControlReceivedCallback = std::function<void(JobFlatBuffers::JobControlT &)>;
 

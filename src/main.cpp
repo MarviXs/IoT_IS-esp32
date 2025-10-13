@@ -11,7 +11,7 @@
 #include "sensors/sht41.h"
 #include "sensors/sgp41.h"
 
-#define LED_PIN 2
+#define LED_PIN 26
 
 const char *ssid = "";
 const char *password = "";
@@ -62,6 +62,7 @@ void setup()
     start_wifi_connection(ssid, password);
     while (WiFi.status() != WL_CONNECTED)
     {
+        ESP_LOGI(TAG, "Connecting to WiFi...");
         vTaskDelay(1000 / portTICK_PERIOD_MS);
     }
 
@@ -72,6 +73,12 @@ void setup()
     // initSGP41();
 
     iotIs.connect(accessToken, mqttHost, mqttPort);
+    while (!iotIs.isConnected)
+    {
+        ESP_LOGI(TAG, "Waiting for MQTT connection...");
+        vTaskDelay(1000 / portTICK_PERIOD_MS);
+    }
+    iotIs.send_data("led", 0);
 }
 
 void loop()
