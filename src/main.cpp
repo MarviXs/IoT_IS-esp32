@@ -59,6 +59,9 @@ void setup()
     job_manager.register_command("toggle_led", toggleLed);
     // job_manager.register_command("force_scd41_recalibration", forceSCD41Recalibration);
 
+    // mark firmware valid - if any fatal error occurs after update, rollback to previous firmware will be done up to this point
+    esp_ota_mark_app_valid_cancel_rollback();
+
     start_wifi_connection(ssid, password);
     while (WiFi.status() != WL_CONNECTED)
     {
@@ -71,6 +74,12 @@ void setup()
     // initSHT41();
     // initSCD41();
     // initSGP41();
+    
+    //report current firmware version to backend
+    updateFirmwareVersion(accessToken.c_str(), esp_ota_get_app_description()->version);
+
+    //fetch and perform OTA update if available
+    perform_ota_update(accessToken.c_str());
 
     iotIs.connect(accessToken, mqttHost, mqttPort);
     while (!iotIs.isConnected)
