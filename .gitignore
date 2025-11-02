@@ -1,0 +1,9 @@
+build/
+sdkconfig
+sdkconfig.old
+main/config.h
+*.lock
+managed_components/
+.vscode/c_cpp_properties.json
+.vscode/launch.json
+.vscode/settings.json
