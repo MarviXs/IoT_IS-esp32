@@ -151,11 +151,12 @@ esp_err_t perform_ota_update(const char* base_url, const char* accessToken) {
     const char *avail  = versionNumber->valuestring;
 
     int cmp = semver_compare(curVer, avail);
+    ESP_LOGI(OTA_TAG, "Current: %s, Available: %s", curVer, versionNumber->valuestring);
     /* cmp > 0  -> current is newer
     cmp == 0 -> equal (same base + same prerelease)
     cmp < 0  -> available is newer (do OTA) */
     if (cmp >= 0) {
-        ESP_LOGI(OTA_TAG, "No update needed. Current: %s, Available: %s", curVer, versionNumber->valuestring);
+        ESP_LOGI(OTA_TAG, "No update needed.");
         cJSON_Delete(root);
         free(resp);
         return ESP_OK;

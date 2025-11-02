@@ -49,6 +49,7 @@ extern "C" void app_main(void)
     }
 
     iotIs.send_data("device_started", 1);
+    
 
     while(1){
         //main loop

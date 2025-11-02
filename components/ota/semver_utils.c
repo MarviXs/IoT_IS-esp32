@@ -101,23 +101,33 @@ static int compare_prerelease(const char *a, const char *b) {
         if (na == 0) return -1; /* a shorter -> lower */
         if (nb == 0) return  1;
 
-        bool an = token_is_numeric(ta, na);
-        bool bn = token_is_numeric(tb, nb);
+        /* ----- DIRTY WINS rule ----- */
+        if (na == 5 && strncmp(ta, "dirty", 5) == 0 && !(nb == 5 && strncmp(tb, "dirty", 5) == 0)) {
+            return 1;  /* a has 'dirty' -> higher */
+        }
+        if (nb == 5 && strncmp(tb, "dirty", 5) == 0 && !(na == 5 && strncmp(ta, "dirty", 5) == 0)) {
+            return -1; /* b has 'dirty' -> higher */
+        }
+        /* --------------------------- */
 
-        if (an && bn) {
-            long ai = strtol(ta, NULL, 10);
-            long bi = strtol(tb, NULL, 10);
-            if (ai != bi) return (ai > bi) ? 1 : -1;
-        } else if (an != bn) {
-            /* numeric < non-numeric (SemVer rule) */
-            return an ? -1 : 1;
-        } else {
-            /* both non-numeric: lexicographic */
-            int r;
-            size_t n = (na < nb) ? na : nb;
-            r = strncmp(ta, tb, n);
-            if (r != 0) return (r > 0) ? 1 : -1;
-            if (na != nb) return (na > nb) ? 1 : -1;
+        {
+            bool an = token_is_numeric(ta, na);
+            bool bn = token_is_numeric(tb, nb);
+
+            if (an && bn) {
+                long ai = strtol(ta, NULL, 10);
+                long bi = strtol(tb, NULL, 10);
+                if (ai != bi) return (ai > bi) ? 1 : -1;
+            } else if (an != bn) {
+                /* SemVer: numeric < non-numeric */
+                return an ? -1 : 1;
+            } else {
+                int r;
+                size_t n = (na < nb) ? na : nb;
+                r = strncmp(ta, tb, n);
+                if (r) return (r > 0) ? 1 : -1;
+                if (na != nb) return (na > nb) ? 1 : -1;
+            }
         }
     }
     return 0;
@@ -135,12 +145,14 @@ int semver_compare(const char *a, const char *b) {
         if (va.patch != vb.patch) return (va.patch > vb.patch) ? 1 : -1;
 
         /* base equal → clean > prerelease; dirty counts as prerelease and is lower */
+        if (va.is_dirty != vb.is_dirty) {
+            /* DIRTY > CLEAN at same base */
+            return va.is_dirty ? 1 : -1;
+        }
         if (va.has_prerelease != vb.has_prerelease) {
             return va.has_prerelease ? -1 : 1;
         }
         if (va.has_prerelease && vb.has_prerelease) {
-            /* If one is dirty and the other isn't, dirty is lower */
-            if (va.is_dirty != vb.is_dirty) return va.is_dirty ? -1 : 1;
             return compare_prerelease(va.prerelease, vb.prerelease);
         }
         return 0;
