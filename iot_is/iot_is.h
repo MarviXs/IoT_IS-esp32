@@ -46,4 +46,5 @@ private:
 };
 
 extern IoTIs iotIs;
-#endif
+
+#endif // IOT_IS_H
