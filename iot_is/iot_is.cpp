@@ -38,6 +38,18 @@ void IoTIs::connect(const std::string &accessToken, const std::string &mqttHost,
     xTaskCreate(&IoTIs::connect_task, "connect_task", 4096, this, 5, NULL);
 }
 
+void IoTIs::disconnect()
+{
+    if (_mqttClient != nullptr)
+    {
+        esp_mqtt_client_unregister_event(_mqttClient, (esp_mqtt_event_id_t)ESP_EVENT_ANY_ID, mqtt_event_handler);
+        esp_mqtt_client_stop(_mqttClient);
+        esp_mqtt_client_destroy(_mqttClient);
+        _mqttClient = nullptr;
+    }
+    isConnected = false;
+}
+
 void IoTIs::connect_task(void *pvParameters)
 {
     IoTIs *instance = static_cast<IoTIs *>(pvParameters);

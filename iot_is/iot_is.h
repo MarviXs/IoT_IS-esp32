@@ -13,6 +13,7 @@ public:
     ~IoTIs();
 
     void connect(const std::string &accessToken, const std::string &mqttHost, int mqttPort);
+    void disconnect();
     bool send_data(const std::string &tag, double value);
     bool send_data(const std::string &tag, double value, int64_t ts);
     bool update_job_status(JobFlatBuffers::JobT &job);
