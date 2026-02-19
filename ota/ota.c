@@ -5,16 +5,11 @@
 #include "esp_https_ota.h"
 #include "esp_log.h"
 #include "semver_utils.h"
+#include "esp_crt_bundle.h"
 
 #define OTA_TAG "OTA"
 #define HTTP_READ_CHUNK 1024
 #define HTTP_TIMEOUT_MS 15000
-
-extern const char  _binary_cacert_pem_start[];
-extern const char  _binary_cacert_pem_end[];
-static inline size_t server_pem_len(void) {
-    return (size_t)(_binary_cacert_pem_end - _binary_cacert_pem_start);
-}
 
 typedef struct {
     int major, minor, patch;
@@ -89,8 +84,7 @@ static esp_err_t http_get_all(esp_http_client_handle_t client, char **out_buf, i
 esp_err_t perform_ota_update(const char* base_url, const char* accessToken) {
     esp_http_client_config_t config = {
         .url = base_url,
-        .cert_pem = _binary_cacert_pem_start,
-        .cert_len = server_pem_len(),
+        .crt_bundle_attach = esp_crt_bundle_attach,
         .method = HTTP_METHOD_GET,
         .timeout_ms = HTTP_TIMEOUT_MS,
         .disable_auto_redirect = false,  // allow redirects
@@ -188,8 +182,7 @@ esp_err_t updateFirmwareVersion(const char* base_url, const char* accessToken){
     //make a POST request to /devices/{accessToken}/firmwares/current with JSON body {"versionNumber": "x.y.z"}
     esp_http_client_config_t config = {
         .url = base_url,
-        .cert_pem = _binary_cacert_pem_start,
-        .cert_len = server_pem_len(),
+        .crt_bundle_attach = esp_crt_bundle_attach,
         .method = HTTP_METHOD_POST,
     };
     char url[256];
@@ -201,6 +194,10 @@ esp_err_t updateFirmwareVersion(const char* base_url, const char* accessToken){
     const char* versionNumber = esp_app_get_description()->version;
 
     esp_http_client_handle_t client = esp_http_client_init(&config);
+    if(client == NULL){
+        return ESP_ERR_INVALID_ARG;
+    }
+    
     char postData[128];
     snprintf(postData, sizeof(postData), "{\"versionNumber\": \"%s\"}", versionNumber);
     esp_http_client_set_post_field(client, postData, strlen(postData));
