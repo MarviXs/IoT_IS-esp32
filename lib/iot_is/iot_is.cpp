@@ -60,7 +60,7 @@ bool IoTIs::send_data(const std::string &tag, double value)
 
 bool IoTIs::send_data(const std::string &tag, double value, int64_t ts)
 {
-    return send_data_internal(tag, value, ts, 0.0, 0.0, 0, 0);
+    return send_data_internal(tag, value, ts, -1.0, -1.0, -1, -1);
 }
 
 bool IoTIs::send_data_with_location(const std::string &tag, double value, double latitude, double longitude)
@@ -70,7 +70,7 @@ bool IoTIs::send_data_with_location(const std::string &tag, double value, double
 
 bool IoTIs::send_data_with_location(const std::string &tag, double value, int64_t ts, double latitude, double longitude)
 {
-    return send_data_internal(tag, value, ts, latitude, longitude, 0, 0);
+    return send_data_internal(tag, value, ts, latitude, longitude, -1, -1);
 }
 
 bool IoTIs::send_data_with_grid(const std::string &tag, double value, int32_t gridX, int32_t gridY)
@@ -80,7 +80,7 @@ bool IoTIs::send_data_with_grid(const std::string &tag, double value, int32_t gr
 
 bool IoTIs::send_data_with_grid(const std::string &tag, double value, int64_t ts, int32_t gridX, int32_t gridY)
 {
-    return send_data_internal(tag, value, ts, 0.0, 0.0, gridX, gridY);
+    return send_data_internal(tag, value, ts, -1.0, -1.0, gridX, gridY);
 }
 
 bool IoTIs::send_data_internal(const std::string &tag, double value, int64_t ts, double latitude, double longitude, int32_t gridX, int32_t gridY)
