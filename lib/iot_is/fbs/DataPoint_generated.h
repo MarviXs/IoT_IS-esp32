@@ -24,6 +24,10 @@ struct DataPointT : public ::flatbuffers::NativeTable {
   std::string tag{};
   double value = 0.0;
   int64_t ts = 0;
+  double latitude = 0.0;
+  double longitude = 0.0;
+  int32_t grid_x = 0;
+  int32_t grid_y = 0;
 };
 
 struct DataPoint FLATBUFFERS_FINAL_CLASS : private ::flatbuffers::Table {
@@ -32,7 +36,11 @@ struct DataPoint FLATBUFFERS_FINAL_CLASS : private ::flatbuffers::Table {
   enum FlatBuffersVTableOffset FLATBUFFERS_VTABLE_UNDERLYING_TYPE {
     VT_TAG = 4,
     VT_VALUE = 6,
-    VT_TS = 8
+    VT_TS = 8,
+    VT_LATITUDE = 10,
+    VT_LONGITUDE = 12,
+    VT_GRID_X = 14,
+    VT_GRID_Y = 16
   };
   const ::flatbuffers::String *tag() const {
     return GetPointer<const ::flatbuffers::String *>(VT_TAG);
@@ -43,12 +51,28 @@ struct DataPoint FLATBUFFERS_FINAL_CLASS : private ::flatbuffers::Table {
   int64_t ts() const {
     return GetField<int64_t>(VT_TS, 0);
   }
+  double latitude() const {
+    return GetField<double>(VT_LATITUDE, 0.0);
+  }
+  double longitude() const {
+    return GetField<double>(VT_LONGITUDE, 0.0);
+  }
+  int32_t grid_x() const {
+    return GetField<int32_t>(VT_GRID_X, 0);
+  }
+  int32_t grid_y() const {
+    return GetField<int32_t>(VT_GRID_Y, 0);
+  }
   bool Verify(::flatbuffers::Verifier &verifier) const {
     return VerifyTableStart(verifier) &&
            VerifyOffset(verifier, VT_TAG) &&
            verifier.VerifyString(tag()) &&
            VerifyField<double>(verifier, VT_VALUE, 8) &&
            VerifyField<int64_t>(verifier, VT_TS, 8) &&
+           VerifyField<double>(verifier, VT_LATITUDE, 8) &&
+           VerifyField<double>(verifier, VT_LONGITUDE, 8) &&
+           VerifyField<int32_t>(verifier, VT_GRID_X, 4) &&
+           VerifyField<int32_t>(verifier, VT_GRID_Y, 4) &&
            verifier.EndTable();
   }
   DataPointT *UnPack(const ::flatbuffers::resolver_function_t *_resolver = nullptr) const;
@@ -69,6 +93,18 @@ struct DataPointBuilder {
   void add_ts(int64_t ts) {
     fbb_.AddElement<int64_t>(DataPoint::VT_TS, ts, 0);
   }
+  void add_latitude(double latitude) {
+    fbb_.AddElement<double>(DataPoint::VT_LATITUDE, latitude, 0.0);
+  }
+  void add_longitude(double longitude) {
+    fbb_.AddElement<double>(DataPoint::VT_LONGITUDE, longitude, 0.0);
+  }
+  void add_grid_x(int32_t grid_x) {
+    fbb_.AddElement<int32_t>(DataPoint::VT_GRID_X, grid_x, 0);
+  }
+  void add_grid_y(int32_t grid_y) {
+    fbb_.AddElement<int32_t>(DataPoint::VT_GRID_Y, grid_y, 0);
+  }
   explicit DataPointBuilder(::flatbuffers::FlatBufferBuilder &_fbb)
         : fbb_(_fbb) {
     start_ = fbb_.StartTable();
@@ -84,10 +120,18 @@ inline ::flatbuffers::Offset<DataPoint> CreateDataPoint(
     ::flatbuffers::FlatBufferBuilder &_fbb,
     ::flatbuffers::Offset<::flatbuffers::String> tag = 0,
     double value = 0.0,
-    int64_t ts = 0) {
+    int64_t ts = 0,
+    double latitude = 0.0,
+    double longitude = 0.0,
+    int32_t grid_x = 0,
+    int32_t grid_y = 0) {
   DataPointBuilder builder_(_fbb);
+  builder_.add_longitude(longitude);
+  builder_.add_latitude(latitude);
   builder_.add_ts(ts);
   builder_.add_value(value);
+  builder_.add_grid_y(grid_y);
+  builder_.add_grid_x(grid_x);
   builder_.add_tag(tag);
   return builder_.Finish();
 }
@@ -96,13 +140,21 @@ inline ::flatbuffers::Offset<DataPoint> CreateDataPointDirect(
     ::flatbuffers::FlatBufferBuilder &_fbb,
     const char *tag = nullptr,
     double value = 0.0,
-    int64_t ts = 0) {
+    int64_t ts = 0,
+    double latitude = 0.0,
+    double longitude = 0.0,
+    int32_t grid_x = 0,
+    int32_t grid_y = 0) {
   auto tag__ = tag ? _fbb.CreateString(tag) : 0;
   return DataPointFlatBuffers::CreateDataPoint(
       _fbb,
       tag__,
       value,
-      ts);
+      ts,
+      latitude,
+      longitude,
+      grid_x,
+      grid_y);
 }
 
 ::flatbuffers::Offset<DataPoint> CreateDataPoint(::flatbuffers::FlatBufferBuilder &_fbb, const DataPointT *_o, const ::flatbuffers::rehasher_function_t *_rehasher = nullptr);
@@ -119,6 +171,10 @@ inline void DataPoint::UnPackTo(DataPointT *_o, const ::flatbuffers::resolver_fu
   { auto _e = tag(); if (_e) _o->tag = _e->str(); }
   { auto _e = value(); _o->value = _e; }
   { auto _e = ts(); _o->ts = _e; }
+  { auto _e = latitude(); _o->latitude = _e; }
+  { auto _e = longitude(); _o->longitude = _e; }
+  { auto _e = grid_x(); _o->grid_x = _e; }
+  { auto _e = grid_y(); _o->grid_y = _e; }
 }
 
 inline ::flatbuffers::Offset<DataPoint> DataPoint::Pack(::flatbuffers::FlatBufferBuilder &_fbb, const DataPointT* _o, const ::flatbuffers::rehasher_function_t *_rehasher) {
@@ -132,11 +188,19 @@ inline ::flatbuffers::Offset<DataPoint> CreateDataPoint(::flatbuffers::FlatBuffe
   auto _tag = _o->tag.empty() ? 0 : _fbb.CreateString(_o->tag);
   auto _value = _o->value;
   auto _ts = _o->ts;
+  auto _latitude = _o->latitude;
+  auto _longitude = _o->longitude;
+  auto _grid_x = _o->grid_x;
+  auto _grid_y = _o->grid_y;
   return DataPointFlatBuffers::CreateDataPoint(
       _fbb,
       _tag,
       _value,
-      _ts);
+      _ts,
+      _latitude,
+      _longitude,
+      _grid_x,
+      _grid_y);
 }
 
 inline const DataPointFlatBuffers::DataPoint *GetDataPoint(const void *buf) {

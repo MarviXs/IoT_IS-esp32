@@ -4,6 +4,7 @@
 #include "iot_is.h"
 #include "job_manager.h"
 #include "esp_log.h"
+#include "ota.h"
 #include "utils/wifi_connection.h"
 #include "utils/sntp.h"
 #include <Wire.h>

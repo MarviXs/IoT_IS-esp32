@@ -4,6 +4,10 @@ table DataPoint {
     tag: string;
     value: double;
     ts: long;
+    latitude: double;
+    longitude: double;
+    grid_x: int;
+    grid_y: int;
 }
 
 root_type DataPoint;

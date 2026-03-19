@@ -60,6 +60,31 @@ bool IoTIs::send_data(const std::string &tag, double value)
 
 bool IoTIs::send_data(const std::string &tag, double value, int64_t ts)
 {
+    return send_data_internal(tag, value, ts, 0.0, 0.0, 0, 0);
+}
+
+bool IoTIs::send_data_with_location(const std::string &tag, double value, double latitude, double longitude)
+{
+    return send_data_with_location(tag, value, get_current_time(), latitude, longitude);
+}
+
+bool IoTIs::send_data_with_location(const std::string &tag, double value, int64_t ts, double latitude, double longitude)
+{
+    return send_data_internal(tag, value, ts, latitude, longitude, 0, 0);
+}
+
+bool IoTIs::send_data_with_grid(const std::string &tag, double value, int32_t gridX, int32_t gridY)
+{
+    return send_data_with_grid(tag, value, get_current_time(), gridX, gridY);
+}
+
+bool IoTIs::send_data_with_grid(const std::string &tag, double value, int64_t ts, int32_t gridX, int32_t gridY)
+{
+    return send_data_internal(tag, value, ts, 0.0, 0.0, gridX, gridY);
+}
+
+bool IoTIs::send_data_internal(const std::string &tag, double value, int64_t ts, double latitude, double longitude, int32_t gridX, int32_t gridY)
+{
     if (_mqttClient == nullptr)
     {
         ESP_LOGE(TAG, "MQTT client not initialized");
@@ -68,7 +93,15 @@ bool IoTIs::send_data(const std::string &tag, double value, int64_t ts)
 
     flatbuffers::FlatBufferBuilder builder;
 
-    auto datapoint = DataPointFlatBuffers::CreateDataPoint(builder, builder.CreateString(tag), value, ts);
+    auto datapoint = DataPointFlatBuffers::CreateDataPoint(
+        builder,
+        builder.CreateString(tag),
+        value,
+        ts,
+        latitude,
+        longitude,
+        gridX,
+        gridY);
 
     builder.Finish(datapoint);
 
