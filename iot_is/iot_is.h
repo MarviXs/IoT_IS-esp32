@@ -16,6 +16,10 @@ public:
     void disconnect();
     bool send_data(const std::string &tag, double value);
     bool send_data(const std::string &tag, double value, int64_t ts);
+    bool send_data_with_location(const std::string &tag, double value, double latitude, double longitude);
+    bool send_data_with_location(const std::string &tag, double value, int64_t ts, double latitude, double longitude);
+    bool send_data_with_grid(const std::string &tag, double value, int32_t gridX, int32_t gridY);
+    bool send_data_with_grid(const std::string &tag, double value, int64_t ts, int32_t gridX, int32_t gridY);
     bool update_job_status(JobFlatBuffers::JobT &job);
 
     // MQTT connection state: true after successful connect, false on failure/disconnect
@@ -43,6 +47,7 @@ private:
     void on_data_received(esp_mqtt_event_handle_t event);
     void process_received_job(esp_mqtt_event_handle_t event);
     void process_received_job_control(esp_mqtt_event_handle_t event);
+    bool send_data_internal(const std::string &tag, double value, int64_t ts, double latitude, double longitude, int32_t gridX, int32_t gridY);
     int64_t get_current_time();
 };
 
