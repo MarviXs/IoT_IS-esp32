@@ -85,6 +85,7 @@ bool JobManager::start_job(JobFlatBuffers::JobT &job)
             auto *params = static_cast<std::pair<JobManager *, std::string> *>(arg);
             params->first->execute_job_task(params->second);
             delete params;
+            vTaskDelete(NULL);
         },
         ("JobTask_" + stored_job.job_id).c_str(),
         4096,
@@ -129,9 +130,10 @@ bool JobManager::resume_job(const std::string &job_id)
     {
         it->second.status = JobFlatBuffers::JobStatusEnum_JOB_IN_PROGRESS;
         it->second.paused = false;
-        if (job_task_handles[job_id] != nullptr)
+        auto h_it = job_task_handles.find(job_id);
+        if (h_it != job_task_handles.end() && h_it->second != nullptr)
         {
-            vTaskResume(job_task_handles[job_id]);
+            vTaskSuspend(h_it->second);
         }
         notify_job_update(it->second);
         ESP_LOGI(TAG, "Job %s resumed", job_id.c_str());
@@ -148,14 +150,17 @@ void JobManager::cancel_job(const std::string &job_id)
     {
         it->second.status = JobFlatBuffers::JobStatusEnum_JOB_CANCELED;
         it->second.finished_at = get_current_time();
-        if (job_task_handles[job_id] != nullptr)
+
+        auto h_it = job_task_handles.find(job_id);
+        if (h_it != job_task_handles.end() && h_it->second != nullptr)
         {
-            vTaskDelete(job_task_handles[job_id]);
-            job_task_handles.erase(job_id);
+            vTaskDelete(h_it->second);
+            job_task_handles.erase(h_it);
         }
+
         notify_job_update(it->second);
         ESP_LOGI(TAG, "Job %s canceled", job_id.c_str());
-        active_jobs.erase(job_id);
+        active_jobs.erase(it);
     }
     else
     {
@@ -216,7 +221,16 @@ bool JobManager::skip_cycle(const std::string &job_id)
 
 void JobManager::execute_job_task(const std::string &job_id)
 {
-    JobFlatBuffers::JobT &job = active_jobs[job_id];
+    auto it = active_jobs.find(job_id);
+    if (it == active_jobs.end())
+    {
+        ESP_LOGW(TAG, "Job %s not found at task start", job_id.c_str());
+        job_task_handles.erase(job_id);
+        return;
+    }
+
+    JobFlatBuffers::JobT &job = it->second;
+
     while (job.current_cycle <= job.total_cycles)
     {
         while (job.current_step <= job.total_steps)
@@ -224,6 +238,8 @@ void JobManager::execute_job_task(const std::string &job_id)
             if (!execute_command(job_id))
             {
                 notify_job_update(job);
+                active_jobs.erase(job_id);
+                job_task_handles.erase(job_id);
                 return;
             }
 
@@ -231,6 +247,7 @@ void JobManager::execute_job_task(const std::string &job_id)
             {
                 break;
             }
+
             job.current_step++;
             notify_job_update(job);
         }
@@ -256,13 +273,19 @@ void JobManager::execute_job_task(const std::string &job_id)
     notify_job_update(job);
     active_jobs.erase(job_id);
     job_task_handles.erase(job_id);
-    vTaskDelete(NULL);
 }
 
 // Update execute_command to use the job ID
 bool JobManager::execute_command(const std::string &job_id)
 {
-    JobFlatBuffers::JobT &job = active_jobs[job_id];
+    auto it = active_jobs.find(job_id);
+    if (it == active_jobs.end())
+    {
+        ESP_LOGE(TAG, "Job %s not found", job_id.c_str());
+        return false;
+    }
+
+    JobFlatBuffers::JobT &job = it->second;
     const JobFlatBuffers::CommandT &command = *job.commands[job.current_step - 1];
     CommandFunction func = command_registry.get_command(command.name);
     if (func)
