@@ -255,12 +255,8 @@ void JobManager::execute_job_task(const std::string &job_id)
     ESP_LOGI(TAG, "Job %s finished", job.name.c_str());
     notify_job_update(job);
     active_jobs.erase(job_id);
-
-    if (job_task_handles.find(job_id) != job_task_handles.end())
-    {
-        job_task_handles.erase(job_id);
-        vTaskDelete(job_task_handles[job_id]);
-    }
+    job_task_handles.erase(job_id);
+    vTaskDelete(NULL);
 }
 
 // Update execute_command to use the job ID
