@@ -13,6 +13,8 @@ public:
     ~IoTIs();
 
     void connect(const std::string &accessToken, const std::string &mqttHost, int mqttPort);
+    int enqueue_data(const std::string &tag, double value);
+    int enqueue_data(const std::string &tag, double value, int64_t ts);
     bool send_data(const std::string &tag, double value);
     bool send_data(const std::string &tag, double value, int64_t ts);
     bool send_data_with_location(const std::string &tag, double value, double latitude, double longitude);
@@ -26,9 +28,11 @@ public:
 
     using JobReceivedCallback = std::function<void(JobFlatBuffers::JobT &)>;
     using JobControlReceivedCallback = std::function<void(JobFlatBuffers::JobControlT &)>;
+    using DataPublishedCallback = std::function<void(int)>;
 
     void set_job_received_callback(JobReceivedCallback callback);
     void set_job_control_received_callback(JobControlReceivedCallback callback);
+    void set_data_published_callback(DataPublishedCallback callback);
 
 private:
     esp_mqtt_client_handle_t _mqttClient;
@@ -38,6 +42,7 @@ private:
 
     JobReceivedCallback _job_received_callback;
     JobControlReceivedCallback _job_control_received_callback;
+    DataPublishedCallback _data_published_callback;
 
     static void connect_task(void *pvParameters);
     static void mqtt_event_handler(void *handler_args, esp_event_base_t base, int32_t event_id, void *event_data);
@@ -46,7 +51,7 @@ private:
     void on_data_received(esp_mqtt_event_handle_t event);
     void process_received_job(esp_mqtt_event_handle_t event);
     void process_received_job_control(esp_mqtt_event_handle_t event);
-    bool send_data_internal(const std::string &tag, double value, int64_t ts, double latitude, double longitude, int32_t gridX, int32_t gridY);
+    int enqueue_data_internal(const std::string &tag, double value, int64_t ts, double latitude, double longitude, int32_t gridX, int32_t gridY);
     int64_t get_current_time();
 };
 

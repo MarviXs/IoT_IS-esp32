@@ -55,12 +55,22 @@ void IoTIs::connect_task(void *pvParameters)
 
 bool IoTIs::send_data(const std::string &tag, double value)
 {
-    return send_data(tag, value, get_current_time());
+    return enqueue_data(tag, value) != -1;
 }
 
 bool IoTIs::send_data(const std::string &tag, double value, int64_t ts)
 {
-    return send_data_internal(tag, value, ts, -1.0, -1.0, -1, -1);
+    return enqueue_data(tag, value, ts) != -1;
+}
+
+int IoTIs::enqueue_data(const std::string &tag, double value)
+{
+    return enqueue_data(tag, value, get_current_time());
+}
+
+int IoTIs::enqueue_data(const std::string &tag, double value, int64_t ts)
+{
+    return enqueue_data_internal(tag, value, ts, -1.0, -1.0, -1, -1);
 }
 
 bool IoTIs::send_data_with_location(const std::string &tag, double value, double latitude, double longitude)
@@ -70,7 +80,7 @@ bool IoTIs::send_data_with_location(const std::string &tag, double value, double
 
 bool IoTIs::send_data_with_location(const std::string &tag, double value, int64_t ts, double latitude, double longitude)
 {
-    return send_data_internal(tag, value, ts, latitude, longitude, -1, -1);
+    return enqueue_data_internal(tag, value, ts, latitude, longitude, -1, -1) != -1;
 }
 
 bool IoTIs::send_data_with_grid(const std::string &tag, double value, int32_t gridX, int32_t gridY)
@@ -80,15 +90,15 @@ bool IoTIs::send_data_with_grid(const std::string &tag, double value, int32_t gr
 
 bool IoTIs::send_data_with_grid(const std::string &tag, double value, int64_t ts, int32_t gridX, int32_t gridY)
 {
-    return send_data_internal(tag, value, ts, -1.0, -1.0, gridX, gridY);
+    return enqueue_data_internal(tag, value, ts, -1.0, -1.0, gridX, gridY) != -1;
 }
 
-bool IoTIs::send_data_internal(const std::string &tag, double value, int64_t ts, double latitude, double longitude, int32_t gridX, int32_t gridY)
+int IoTIs::enqueue_data_internal(const std::string &tag, double value, int64_t ts, double latitude, double longitude, int32_t gridX, int32_t gridY)
 {
     if (_mqttClient == nullptr)
     {
         ESP_LOGE(TAG, "MQTT client not initialized");
-        return false;
+        return -1;
     }
 
     flatbuffers::FlatBufferBuilder builder;
@@ -107,8 +117,7 @@ bool IoTIs::send_data_internal(const std::string &tag, double value, int64_t ts,
 
     // Enqueue the message for publishing to MQTT
     std::string topic = "devices/" + _accessToken + "/data";
-    esp_mqtt_client_enqueue(_mqttClient, topic.c_str(), (const char *)builder.GetBufferPointer(), builder.GetSize(), 1, 0, true);
-    return true;
+    return esp_mqtt_client_enqueue(_mqttClient, topic.c_str(), (const char *)builder.GetBufferPointer(), builder.GetSize(), 1, 0, true);
 }
 
 void IoTIs::mqtt_event_handler(void *handler_args, esp_event_base_t base, int32_t event_id, void *event_data)
@@ -133,6 +142,12 @@ void IoTIs::mqtt_event_handler(void *handler_args, esp_event_base_t base, int32_
         break;
     case MQTT_EVENT_DATA:
         instance->on_data_received(event);
+        break;
+    case MQTT_EVENT_PUBLISHED:
+        if (instance->_data_published_callback)
+        {
+            instance->_data_published_callback(event->msg_id);
+        }
         break;
     default:
         break;
@@ -248,6 +263,11 @@ void IoTIs::set_job_received_callback(JobReceivedCallback callback)
 void IoTIs::set_job_control_received_callback(JobControlReceivedCallback callback)
 {
     _job_control_received_callback = std::move(callback);
+}
+
+void IoTIs::set_data_published_callback(DataPublishedCallback callback)
+{
+    _data_published_callback = std::move(callback);
 }
 
 int64_t IoTIs::get_current_time()
