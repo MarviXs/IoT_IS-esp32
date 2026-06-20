@@ -32,6 +32,9 @@ public:
 
     bool update_job_status(JobFlatBuffers::JobT &job);
 
+    /** \brief Publish a raw JSON string to devices/{token}/{topic_suffix}. */
+    bool publish_json(const char *topic_suffix, const char *json);
+
     void set_job_received_callback(JobReceivedCallback callback);
     void set_job_control_received_callback(JobControlReceivedCallback callback);
 

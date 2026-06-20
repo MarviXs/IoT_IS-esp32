@@ -468,6 +468,40 @@ bool IoTIs::update_job_status(JobFlatBuffers::JobT &job)
     return true;
 }
 
+bool IoTIs::publish_json(const char *topic_suffix, const char *json)
+{
+    if (!topic_suffix || !json) return false;
+
+    xSemaphoreTake(_lock, portMAX_DELAY);
+
+    if (_mqttClient == nullptr || _state != MqttConnState::CONNECTED || !isConnected)
+    {
+        xSemaphoreGive(_lock);
+        return false;
+    }
+
+    std::string topic = "devices/" + _accessToken + "/" + topic_suffix;
+    int len = (int)strlen(json);
+
+    int msg_id = esp_mqtt_client_enqueue(
+        _mqttClient,
+        topic.c_str(),
+        json,
+        len,
+        1,
+        0,
+        true);
+
+    xSemaphoreGive(_lock);
+
+    if (msg_id < 0)
+    {
+        ESP_LOGW(TAG, "publish_json enqueue failed: msg_id=%d", msg_id);
+        return false;
+    }
+    return true;
+}
+
 int64_t IoTIs::get_current_time()
 {
     struct timeval tv;
