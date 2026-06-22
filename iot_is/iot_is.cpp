@@ -3,13 +3,15 @@
 #include "iot_is.h"
 #include "esp_log.h"
 #include "esp_heap_caps.h"
+#include "esp_timer.h"
 #include "command_registry.h"
 #include "fbs/DataPoint_generated.h"
 #include "fbs/Job_generated.h"
 #include "fbs/JobControl_generated.h"
 
 #define TAG "IoTIs"
-#define MQTT_OUTBOX_LIMIT_BYTES (8 * 1024)
+#define MQTT_OUTBOX_LIMIT_BYTES  (8 * 1024)
+#define MQTT_STATS_INTERVAL_US   30000000LL  // print flow report every 30 s
 
 IoTIs::IoTIs()
     : isConnected(false),
@@ -19,7 +21,10 @@ IoTIs::IoTIs()
       _mqttPort(0),
       _lock(xSemaphoreCreateMutex()),
       _state(MqttConnState::IDLE),
-      _builder(256)
+      _builder(256),
+      _stat_tx(0),
+      _stat_ack(0),
+      _stat_reset_us(0)
 {
 }
 
@@ -257,7 +262,7 @@ bool IoTIs::send_data_internal(const std::string &tag, double value, int64_t ts,
         _builder.GetSize(),
         1,
         0,
-        true);
+        false);
 
     if (msg_id < 0)
     {
@@ -267,6 +272,30 @@ bool IoTIs::send_data_internal(const std::string &tag, double value, int64_t ts,
                  esp_mqtt_client_get_outbox_size(_mqttClient));
         xSemaphoreGive(_lock);
         return false;
+    }
+
+    // Flow-rate accounting — report every 30 s; warn when ACKs trail enqueues
+    _stat_tx++;
+    {
+        int64_t now_us = esp_timer_get_time();
+        if (_stat_reset_us == 0) _stat_reset_us = now_us;
+        int64_t elapsed = now_us - _stat_reset_us;
+        if (elapsed >= MQTT_STATS_INTERVAL_US)
+        {
+            float    s        = elapsed / 1e6f;
+            uint32_t ack_snap = _stat_ack.exchange(0, std::memory_order_relaxed);
+            float    tx_rate  = _stat_tx  / s;
+            float    ack_rate = ack_snap   / s;
+            int      ob       = esp_mqtt_client_get_outbox_size(_mqttClient);
+            if (ack_snap < _stat_tx)
+                ESP_LOGW(TAG, "MQTT flow [%.0fs]: TX=%.1f ACK=%.1f msg/s outbox=%d B — broker lagging",
+                         s, tx_rate, ack_rate, ob);
+            else
+                ESP_LOGI(TAG, "MQTT flow [%.0fs]: TX=%.1f ACK=%.1f msg/s outbox=%d B OK",
+                         s, tx_rate, ack_rate, ob);
+            _stat_tx       = 0;
+            _stat_reset_us = now_us;
+        }
     }
 
     xSemaphoreGive(_lock);
@@ -297,6 +326,10 @@ void IoTIs::mqtt_event_handler(void *handler_args, esp_event_base_t base, int32_
         instance->isConnected = false;
         instance->_state = MqttConnState::CONNECTING;
         xSemaphoreGive(instance->_lock);
+        break;
+
+    case MQTT_EVENT_PUBLISHED:
+        instance->_stat_ack.fetch_add(1, std::memory_order_relaxed);
         break;
 
     case MQTT_EVENT_DATA:

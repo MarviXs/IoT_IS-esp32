@@ -2,6 +2,7 @@
 
 #include <string>
 #include <functional>
+#include <atomic>
 #include <sys/time.h>
 
 #include "mqtt_client.h"
@@ -66,6 +67,13 @@ private:
 
     JobReceivedCallback _job_received_callback;
     JobControlReceivedCallback _job_control_received_callback;
+
+    // Flow-rate stats. _stat_ack is incremented from the MQTT task (event callback)
+    // so it must be atomic — taking _lock there would deadlock with the app task
+    // calling esp_mqtt_client_get_outbox_size() while holding _lock.
+    uint32_t                _stat_tx;           // enqueued messages (under _lock)
+    std::atomic<uint32_t>   _stat_ack;          // PUBACKs received (lock-free, MQTT task)
+    int64_t                 _stat_reset_us;     // window start (under _lock)
 
     bool ensure_client_created_locked();
     bool send_data_internal(const std::string &tag, double value, int64_t ts, double latitude, double longitude, int32_t gridX, int32_t gridY);
