@@ -24,8 +24,25 @@ IoTIs::IoTIs()
       _builder(256),
       _stat_tx(0),
       _stat_ack(0),
-      _stat_reset_us(0)
+      _stat_reset_us(0),
+      _qos(1)
 {
+}
+
+void IoTIs::set_qos(uint8_t qos)
+{
+    if (qos > 1)
+    {
+        ESP_LOGW(TAG, "QoS %u not supported, clamping to 1", qos);
+        qos = 1;
+    }
+    _qos.store(qos, std::memory_order_relaxed);
+    ESP_LOGI(TAG, "Telemetry QoS set to %u", qos);
+}
+
+uint8_t IoTIs::get_qos() const
+{
+    return _qos.load(std::memory_order_relaxed);
 }
 
 IoTIs::~IoTIs()
@@ -255,14 +272,18 @@ bool IoTIs::send_data_internal(const std::string &tag, double value, int64_t ts,
 
     std::string topic = "devices/" + _accessToken + "/data";
 
+    // QoS 0 needs store=true or esp_mqtt_client_enqueue refuses the message;
+    // stored QoS 0 messages leave the outbox as soon as they hit the socket.
+    const uint8_t qos = _qos.load(std::memory_order_relaxed);
+
     int msg_id = esp_mqtt_client_enqueue(
         _mqttClient,
         topic.c_str(),
         reinterpret_cast<const char *>(_builder.GetBufferPointer()),
         _builder.GetSize(),
-        1,
+        qos,
         0,
-        false);
+        qos == 0);
 
     if (msg_id < 0)
     {
@@ -287,12 +308,17 @@ bool IoTIs::send_data_internal(const std::string &tag, double value, int64_t ts,
             float    tx_rate  = _stat_tx  / s;
             float    ack_rate = ack_snap   / s;
             int      ob       = esp_mqtt_client_get_outbox_size(_mqttClient);
-            if (ack_snap < _stat_tx)
+            // QoS 0 has no PUBACKs — ACK count is meaningless there,
+            // so the lag warning only applies at QoS 1.
+            if (qos == 1 && ack_snap < _stat_tx)
                 ESP_LOGW(TAG, "MQTT flow [%.0fs]: TX=%.1f ACK=%.1f msg/s outbox=%d B — broker lagging",
                          s, tx_rate, ack_rate, ob);
-            else
+            else if (qos == 1)
                 ESP_LOGI(TAG, "MQTT flow [%.0fs]: TX=%.1f ACK=%.1f msg/s outbox=%d B OK",
                          s, tx_rate, ack_rate, ob);
+            else
+                ESP_LOGI(TAG, "MQTT flow [%.0fs]: TX=%.1f msg/s outbox=%d B (QoS 0)",
+                         s, tx_rate, ob);
             _stat_tx       = 0;
             _stat_reset_us = now_us;
         }

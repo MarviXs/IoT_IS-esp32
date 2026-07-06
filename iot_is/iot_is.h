@@ -44,6 +44,19 @@ public:
     bool can_publish() const;
     int outbox_size() const;
 
+    /**
+     * \brief Select QoS for telemetry data (send_data* family).
+     *
+     * 0 — fire and forget: no PUBACK; message leaves the outbox as soon as
+     *     it is written to the socket. Lowest overhead, no delivery guarantee.
+     * 1 — at least once: message waits in the outbox until the broker PUBACKs.
+     *
+     * Job status updates and publish_json always use QoS 1 regardless.
+     * Takes effect from the next message; safe to call at any time.
+     */
+    void set_qos(uint8_t qos);
+    uint8_t get_qos() const;
+
     bool isConnected;
 
     static void mqtt_event_handler(void *handler_args, esp_event_base_t base, int32_t event_id, void *event_data);
@@ -74,6 +87,9 @@ private:
     uint32_t                _stat_tx;           // enqueued messages (under _lock)
     std::atomic<uint32_t>   _stat_ack;          // PUBACKs received (lock-free, MQTT task)
     int64_t                 _stat_reset_us;     // window start (under _lock)
+
+    // Telemetry QoS (0 or 1). Atomic so setters need not take _lock.
+    std::atomic<uint8_t>    _qos;
 
     bool ensure_client_created_locked();
     bool send_data_internal(const std::string &tag, double value, int64_t ts, double latitude, double longitude, int32_t gridX, int32_t gridY);
