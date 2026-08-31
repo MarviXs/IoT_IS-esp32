@@ -57,7 +57,9 @@ public:
     void set_qos(uint8_t qos);
     uint8_t get_qos() const;
 
-    bool isConnected;
+    // Written from the MQTT task's event handler, read from app tasks.
+    // Atomic so the handler never has to take _lock (see locking rules below).
+    std::atomic<bool> isConnected;
 
     static void mqtt_event_handler(void *handler_args, esp_event_base_t base, int32_t event_id, void *event_data);
 
@@ -74,8 +76,20 @@ private:
     std::string _mqttHost;
     int _mqttPort;
 
+    // Locking rules (violating these deadlocks the MQTT task — see mqtt_event_handler):
+    //  - _lock guards _mqttClient lifetime, _builder, config strings and stats. It MAY
+    //    be held across esp_mqtt_client_* calls, BUT the MQTT task must never block on
+    //    it. Therefore the event handler (which runs on the MQTT task, holding esp-mqtt's
+    //    internal API lock) must never take _lock.
+    //  - _cb_lock guards the job callbacks and _accessToken for reads from the MQTT
+    //    task. It must only be held for plain memory access — never across any
+    //    esp_mqtt_client_* call or other blocking operation.
+    //  - esp_mqtt_client_stop()/destroy() block until the MQTT task exits its loop, so
+    //    they must never be called while holding _lock (detach the handle under _lock,
+    //    tear it down after releasing).
     SemaphoreHandle_t _lock;
-    MqttConnState _state;
+    SemaphoreHandle_t _cb_lock;
+    std::atomic<MqttConnState> _state;
     flatbuffers::FlatBufferBuilder _builder;
 
     JobReceivedCallback _job_received_callback;
@@ -92,6 +106,7 @@ private:
     std::atomic<uint8_t>    _qos;
 
     bool ensure_client_created_locked();
+    static void teardown_client(esp_mqtt_client_handle_t client);
     bool send_data_internal(const std::string &tag, double value, int64_t ts, double latitude, double longitude, int32_t gridX, int32_t gridY);
     void on_connected();
     void on_data_received(esp_mqtt_event_handle_t event);

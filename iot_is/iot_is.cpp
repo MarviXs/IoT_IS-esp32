@@ -2,6 +2,7 @@
 
 #include "iot_is.h"
 #include "esp_log.h"
+#include "freertos/task.h"
 #include "esp_heap_caps.h"
 #include "esp_timer.h"
 #include "command_registry.h"
@@ -20,6 +21,7 @@ IoTIs::IoTIs()
       _mqttHost(""),
       _mqttPort(0),
       _lock(xSemaphoreCreateMutex()),
+      _cb_lock(xSemaphoreCreateMutex()),
       _state(MqttConnState::IDLE),
       _builder(256),
       _stat_tx(0),
@@ -54,6 +56,30 @@ IoTIs::~IoTIs()
         vSemaphoreDelete(_lock);
         _lock = nullptr;
     }
+
+    if (_cb_lock != nullptr)
+    {
+        vSemaphoreDelete(_cb_lock);
+        _cb_lock = nullptr;
+    }
+}
+
+/* Stop and destroy a detached client handle. Must NOT be called while holding
+ * _lock: esp_mqtt_client_stop() blocks until the MQTT task exits its loop, and
+ * if that task is currently delivering an event it may be waiting on our locks —
+ * holding _lock here would deadlock both tasks permanently. */
+void IoTIs::teardown_client(esp_mqtt_client_handle_t client)
+{
+    if (client == nullptr)
+    {
+        return;
+    }
+
+    esp_mqtt_client_unregister_event(client,
+                                     static_cast<esp_mqtt_event_id_t>(ESP_EVENT_ANY_ID),
+                                     mqtt_event_handler);
+    esp_mqtt_client_stop(client);
+    esp_mqtt_client_destroy(client);
 }
 
 bool IoTIs::ensure_client_created_locked()
@@ -102,6 +128,8 @@ bool IoTIs::ensure_client_created_locked()
 
 void IoTIs::connect(const std::string &accessToken, const std::string &mqttHost, int mqttPort)
 {
+    esp_mqtt_client_handle_t stale = nullptr;
+
     xSemaphoreTake(_lock, portMAX_DELAY);
 
     const bool cfg_changed =
@@ -109,22 +137,29 @@ void IoTIs::connect(const std::string &accessToken, const std::string &mqttHost,
         (_mqttHost != mqttHost) ||
         (_mqttPort != mqttPort);
 
+    /* _accessToken is also read from the MQTT task (topic matching / subscribe),
+     * which only ever takes _cb_lock — so writes need both locks. */
+    xSemaphoreTake(_cb_lock, portMAX_DELAY);
     _accessToken = accessToken;
+    xSemaphoreGive(_cb_lock);
     _mqttHost = mqttHost;
     _mqttPort = mqttPort;
 
     if (cfg_changed && _mqttClient != nullptr)
     {
         ESP_LOGI(TAG, "MQTT config changed, recreating client");
-        esp_mqtt_client_unregister_event(_mqttClient,
-                                         static_cast<esp_mqtt_event_id_t>(ESP_EVENT_ANY_ID),
-                                         mqtt_event_handler);
-        esp_mqtt_client_stop(_mqttClient);
-        esp_mqtt_client_destroy(_mqttClient);
+        stale = _mqttClient;
         _mqttClient = nullptr;
         _state = MqttConnState::IDLE;
         isConnected = false;
     }
+
+    xSemaphoreGive(_lock);
+
+    /* Blocks until the old client's task exits — must run without _lock held. */
+    teardown_client(stale);
+
+    xSemaphoreTake(_lock, portMAX_DELAY);
 
     if (_state == MqttConnState::CONNECTED || _state == MqttConnState::CONNECTING)
     {
@@ -164,21 +199,19 @@ void IoTIs::connect(const std::string &accessToken, const std::string &mqttHost,
 void IoTIs::disconnect()
 {
     xSemaphoreTake(_lock, portMAX_DELAY);
-
-    if (_mqttClient != nullptr)
-    {
-        esp_mqtt_client_unregister_event(_mqttClient,
-                                         static_cast<esp_mqtt_event_id_t>(ESP_EVENT_ANY_ID),
-                                         mqtt_event_handler);
-        esp_mqtt_client_stop(_mqttClient);
-        esp_mqtt_client_destroy(_mqttClient);
-        _mqttClient = nullptr;
-    }
-
+    esp_mqtt_client_handle_t client = _mqttClient;
+    _mqttClient = nullptr;
     _state = MqttConnState::IDLE;
     isConnected = false;
-
     xSemaphoreGive(_lock);
+
+    /* Blocks until the client's task exits — must run without _lock held. */
+    teardown_client(client);
+
+    /* A straggler DISCONNECTED/ERROR event delivered before the unregister took
+     * effect may have flipped the state back to CONNECTING — settle it. */
+    _state = MqttConnState::IDLE;
+    isConnected = false;
 }
 
 bool IoTIs::can_publish() const
@@ -328,6 +361,12 @@ bool IoTIs::send_data_internal(const std::string &tag, double value, int64_t ts,
     return true;
 }
 
+/* Runs on the MQTT client's own task, which dispatches events while holding
+ * esp-mqtt's internal API lock for the whole loop iteration. App tasks hold
+ * _lock while calling esp_mqtt_client_enqueue()/get_outbox_size() (which block
+ * on that same API lock), so if this handler ever blocked on _lock the two
+ * tasks would deadlock each other permanently (ABBA). Hence: atomics and
+ * _cb_lock only in here — never _lock. */
 void IoTIs::mqtt_event_handler(void *handler_args, esp_event_base_t base, int32_t event_id, void *event_data)
 {
     (void)base;
@@ -338,20 +377,21 @@ void IoTIs::mqtt_event_handler(void *handler_args, esp_event_base_t base, int32_
     {
     case MQTT_EVENT_CONNECTED:
         ESP_LOGI(TAG, "MQTT_EVENT_CONNECTED");
-        xSemaphoreTake(instance->_lock, portMAX_DELAY);
         instance->isConnected = true;
         instance->_state = MqttConnState::CONNECTED;
-        xSemaphoreGive(instance->_lock);
         instance->on_connected();
         break;
 
     case MQTT_EVENT_DISCONNECTED:
     case MQTT_EVENT_ERROR:
         ESP_LOGI(TAG, "MQTT_EVENT_ERROR");
-        xSemaphoreTake(instance->_lock, portMAX_DELAY);
         instance->isConnected = false;
-        instance->_state = MqttConnState::CONNECTING;
-        xSemaphoreGive(instance->_lock);
+        /* esp-mqtt auto-reconnects, so report CONNECTING — but don't resurrect
+         * a client that disconnect() is tearing down (state already IDLE). */
+        if (instance->_state != MqttConnState::IDLE)
+        {
+            instance->_state = MqttConnState::CONNECTING;
+        }
         break;
 
     case MQTT_EVENT_PUBLISHED:
@@ -369,30 +409,76 @@ void IoTIs::mqtt_event_handler(void *handler_args, esp_event_base_t base, int32_
 
 void IoTIs::on_connected()
 {
-    if (_mqttClient == nullptr)
+    /* On the MQTT task: the handle can't be destroyed under us here (stop()
+     * waits for this task), but it may have been detached by a concurrent
+     * disconnect() — then it's about to die, so skip the subscribes. */
+    esp_mqtt_client_handle_t client = _mqttClient;
+    if (client == nullptr)
     {
         return;
     }
 
-    std::string topic_job = "devices/" + _accessToken + "/job";
-    std::string topic_job_ctrl = "devices/" + _accessToken + "/job/control";
+    xSemaphoreTake(_cb_lock, portMAX_DELAY);
+    std::string token = _accessToken;
+    xSemaphoreGive(_cb_lock);
 
-    esp_mqtt_client_subscribe(_mqttClient, topic_job.c_str(), 1);
-    esp_mqtt_client_subscribe(_mqttClient, topic_job_ctrl.c_str(), 2);
+    std::string topic_job = "devices/" + token + "/job";
+    std::string topic_job_ctrl = "devices/" + token + "/job/control";
+
+    /* The API lock is recursive, so subscribing from the MQTT task is fine. */
+    esp_mqtt_client_subscribe(client, topic_job.c_str(), 1);
+    esp_mqtt_client_subscribe(client, topic_job_ctrl.c_str(), 2);
 }
 
 void IoTIs::on_data_received(esp_mqtt_event_handle_t event)
 {
+    xSemaphoreTake(_cb_lock, portMAX_DELAY);
+    std::string token = _accessToken;
+    xSemaphoreGive(_cb_lock);
+
     std::string topic(event->topic, event->topic_len);
 
-    if (topic == "devices/" + _accessToken + "/job")
+    if (topic == "devices/" + token + "/job")
     {
         process_received_job(event);
     }
-    else if (topic == "devices/" + _accessToken + "/job/control")
+    else if (topic == "devices/" + token + "/job/control")
     {
         process_received_job_control(event);
     }
+}
+
+/* Job callbacks call back into publish paths (update_job_status takes _lock and
+ * the esp-mqtt API lock), so they must not run on the MQTT task — that would
+ * re-create the deadlock this file is guarding against. Run them on a
+ * short-lived worker task instead; job traffic is rare, so the per-message
+ * task cost is negligible. */
+struct JobDispatchArg
+{
+    IoTIs::JobReceivedCallback cb;
+    JobFlatBuffers::JobT job;
+};
+
+struct JobControlDispatchArg
+{
+    IoTIs::JobControlReceivedCallback cb;
+    JobFlatBuffers::JobControlT ctrl;
+};
+
+static void job_dispatch_task(void *arg)
+{
+    auto *a = static_cast<JobDispatchArg *>(arg);
+    a->cb(a->job);
+    delete a;
+    vTaskDelete(NULL);
+}
+
+static void job_control_dispatch_task(void *arg)
+{
+    auto *a = static_cast<JobControlDispatchArg *>(arg);
+    a->cb(a->ctrl);
+    delete a;
+    vTaskDelete(NULL);
 }
 
 void IoTIs::process_received_job(esp_mqtt_event_handle_t event)
@@ -410,17 +496,21 @@ void IoTIs::process_received_job(esp_mqtt_event_handle_t event)
     ESP_LOGI(TAG, "Received job: %s with %ld steps and %ld cycles",
              job.name.c_str(), job.total_steps, job.total_cycles);
 
-    xSemaphoreTake(_lock, portMAX_DELAY);
+    xSemaphoreTake(_cb_lock, portMAX_DELAY);
     auto cb = _job_received_callback;
-    xSemaphoreGive(_lock);
+    xSemaphoreGive(_cb_lock);
 
-    if (cb)
-    {
-        cb(job);
-    }
-    else
+    if (!cb)
     {
         ESP_LOGW(TAG, "No job received callback set");
+        return;
+    }
+
+    auto *arg = new JobDispatchArg{std::move(cb), std::move(job)};
+    if (xTaskCreate(job_dispatch_task, "job_dispatch", 6144, arg, 5, NULL) != pdPASS)
+    {
+        ESP_LOGE(TAG, "Failed to create job dispatch task, dropping job");
+        delete arg;
     }
 }
 
@@ -436,32 +526,36 @@ void IoTIs::process_received_job_control(esp_mqtt_event_handle_t event)
     JobFlatBuffers::JobControlT job_control;
     JobFlatBuffers::GetJobControl(event->data)->UnPackTo(&job_control);
 
-    xSemaphoreTake(_lock, portMAX_DELAY);
+    xSemaphoreTake(_cb_lock, portMAX_DELAY);
     auto cb = _job_control_received_callback;
-    xSemaphoreGive(_lock);
+    xSemaphoreGive(_cb_lock);
 
-    if (cb)
-    {
-        cb(job_control);
-    }
-    else
+    if (!cb)
     {
         ESP_LOGW(TAG, "No job control received callback set");
+        return;
+    }
+
+    auto *arg = new JobControlDispatchArg{std::move(cb), std::move(job_control)};
+    if (xTaskCreate(job_control_dispatch_task, "job_ctrl_disp", 6144, arg, 5, NULL) != pdPASS)
+    {
+        ESP_LOGE(TAG, "Failed to create job control dispatch task, dropping message");
+        delete arg;
     }
 }
 
 void IoTIs::set_job_received_callback(JobReceivedCallback callback)
 {
-    xSemaphoreTake(_lock, portMAX_DELAY);
+    xSemaphoreTake(_cb_lock, portMAX_DELAY);
     _job_received_callback = std::move(callback);
-    xSemaphoreGive(_lock);
+    xSemaphoreGive(_cb_lock);
 }
 
 void IoTIs::set_job_control_received_callback(JobControlReceivedCallback callback)
 {
-    xSemaphoreTake(_lock, portMAX_DELAY);
+    xSemaphoreTake(_cb_lock, portMAX_DELAY);
     _job_control_received_callback = std::move(callback);
-    xSemaphoreGive(_lock);
+    xSemaphoreGive(_cb_lock);
 }
 
 bool IoTIs::update_job_status(JobFlatBuffers::JobT &job)
