@@ -96,6 +96,7 @@ bool JobManager::start_job(JobFlatBuffers::JobT &job)
     if (result != pdPASS)
     {
         ESP_LOGE(TAG, "Failed to create task for job %s", stored_job.job_id.c_str());
+        job_task_handles.erase(stored_job.job_id);
         active_jobs.erase(stored_job.job_id);
         return false;
     }

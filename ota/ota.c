@@ -208,6 +208,7 @@ esp_err_t updateFirmwareVersion(const char* base_url, const char* accessToken){
     } else {
         ESP_LOGE(OTA_TAG, "Failed to update firmware version, error: %d", err);
     }
+    esp_http_client_cleanup(client);
     return err;
 }
 
