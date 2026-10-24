@@ -347,10 +347,10 @@ bool IoTIs::send_data_internal(const std::string &tag, double value, int64_t ts,
                 ESP_LOGW(TAG, "MQTT flow [%.0fs]: TX=%.1f ACK=%.1f msg/s outbox=%d B — broker lagging",
                          s, tx_rate, ack_rate, ob);
             else if (qos == 1)
-                ESP_LOGI(TAG, "MQTT flow [%.0fs]: TX=%.1f ACK=%.1f msg/s outbox=%d B OK",
+                ESP_LOGD(TAG, "MQTT flow [%.0fs]: TX=%.1f ACK=%.1f msg/s outbox=%d B OK",
                          s, tx_rate, ack_rate, ob);
             else
-                ESP_LOGI(TAG, "MQTT flow [%.0fs]: TX=%.1f msg/s outbox=%d B (QoS 0)",
+                ESP_LOGD(TAG, "MQTT flow [%.0fs]: TX=%.1f msg/s outbox=%d B (QoS 0)",
                          s, tx_rate, ob);
             _stat_tx       = 0;
             _stat_reset_us = now_us;
