@@ -14,6 +14,31 @@
 #define MQTT_OUTBOX_LIMIT_BYTES  (8 * 1024)
 #define MQTT_STATS_INTERVAL_US   30000000LL  // print flow report every 30 s
 
+// Telemetry samples are dropped once the outbox holds this much. The outbox holds the QoS 1/2
+// messages that are not acknowledged yet (~110 B each), so 6 KB is ~55 messages: room for a
+// whole batch (~22 messages sent as a burst, acknowledged one round trip later) plus backlog,
+// and below the broker's limit of 100 unfinished QoS 2 exchanges. Job updates may still use the
+// rest up to MQTT_OUTBOX_LIMIT_BYTES. The outbox is esp-mqtt's own bookkeeping, so it also
+// shrinks when esp-mqtt expires old entries (30 s) — a counter of our own would not see that.
+#define MQTT_OUTBOX_DROP_BYTES   (6 * 1024)
+
+// The MQTT task must outrank the tasks that publish (5, 6): esp_mqtt_client_publish() holds the
+// client's API lock while it writes, and with equal priority a publishing task re-takes the lock
+// for its next message before the MQTT task gets to read the PUBACKs / PUBRECs waiting in lwIP.
+#define MQTT_TASK_PRIO           7
+
+// esp-mqtt resends an unacknowledged PUBLISH (and a PUBREL, timed from the original PUBLISH)
+// after this long. Its default of 1 s produces duplicate PUBRELs for exchanges that complete a
+// moment later (broker: pubrel_packetId_not_found) and adds load when the broker is slow.
+#define MQTT_RETRANSMIT_MS       5000
+
+// 1 = clean session: the broker drops the session on every connect, including unfinished QoS 2
+// exchanges (awaiting PUBREL) that otherwise make it refuse a reconnected client until its
+// await_rel_timeout. Cost: messages to the device (jobs) sent while it is offline are not queued.
+// 0 = persistent session (jobs queued while offline). Subscriptions are renewed on every connect
+// either way (on_connected).
+#define MQTT_CLEAN_SESSION       1
+
 IoTIs::IoTIs()
     : isConnected(false),
       _mqttClient(nullptr),
@@ -33,10 +58,10 @@ IoTIs::IoTIs()
 
 void IoTIs::set_qos(uint8_t qos)
 {
-    if (qos > 1)
+    if (qos > 2)
     {
-        ESP_LOGW(TAG, "QoS %u not supported, clamping to 1", qos);
-        qos = 1;
+        ESP_LOGW(TAG, "QoS %u not supported, clamping to 2", qos);
+        qos = 2;
     }
     _qos.store(qos, std::memory_order_relaxed);
     ESP_LOGI(TAG, "Telemetry QoS set to %u", qos);
@@ -95,12 +120,14 @@ bool IoTIs::ensure_client_created_locked()
     mqtt_cfg.broker.address.transport = MQTT_TRANSPORT_OVER_TCP;
 
     mqtt_cfg.buffer.size = 2048;
-    mqtt_cfg.session.disable_clean_session = true;
+    mqtt_cfg.session.disable_clean_session = !MQTT_CLEAN_SESSION;
 
     mqtt_cfg.credentials.client_id = _accessToken.c_str();
     mqtt_cfg.credentials.username = _accessToken.c_str();
 
     mqtt_cfg.outbox.limit = MQTT_OUTBOX_LIMIT_BYTES;
+    mqtt_cfg.task.priority = MQTT_TASK_PRIO;
+    mqtt_cfg.session.message_retransmit_timeout = MQTT_RETRANSMIT_MS;
 
     _mqttClient = esp_mqtt_client_init(&mqtt_cfg);
     if (_mqttClient == nullptr)
@@ -280,9 +307,9 @@ bool IoTIs::send_data_internal(const std::string &tag, double value, int64_t ts,
     }
 
     const int outbox_before = esp_mqtt_client_get_outbox_size(_mqttClient);
-    if (outbox_before >= (int)MQTT_OUTBOX_LIMIT_BYTES)
+    if (outbox_before >= (int)MQTT_OUTBOX_DROP_BYTES)
     {
-        ESP_LOGW(TAG, "MQTT outbox full-ish (%d B), dropping sample", outbox_before);
+        ESP_LOGW(TAG, "MQTT outbox %d B unacknowledged, dropping sample", outbox_before);
         xSemaphoreGive(_lock);
         return false;
     }
@@ -305,22 +332,20 @@ bool IoTIs::send_data_internal(const std::string &tag, double value, int64_t ts,
 
     std::string topic = "devices/" + _accessToken + "/data";
 
-    // QoS 0 needs store=true or esp_mqtt_client_enqueue refuses the message;
-    // stored QoS 0 messages leave the outbox as soon as they hit the socket.
+    // QoS 0 is written to the socket at once and never enters the outbox; QoS 1 and 2
+    // stay in the outbox until the PUBACK / PUBCOMP.
     const uint8_t qos = _qos.load(std::memory_order_relaxed);
-
-    int msg_id = esp_mqtt_client_enqueue(
+    int msg_id = esp_mqtt_client_publish(
         _mqttClient,
         topic.c_str(),
         reinterpret_cast<const char *>(_builder.GetBufferPointer()),
         _builder.GetSize(),
         qos,
-        0,
-        qos == 0);
+        0);
 
     if (msg_id < 0)
     {
-        ESP_LOGW(TAG, "MQTT enqueue failed: msg_id=%d heap=%lu outbox=%d",
+        ESP_LOGW(TAG, "MQTT publish failed: msg_id=%d heap=%lu outbox=%d",
                  msg_id,
                  esp_get_free_heap_size(),
                  esp_mqtt_client_get_outbox_size(_mqttClient));
@@ -341,14 +366,17 @@ bool IoTIs::send_data_internal(const std::string &tag, double value, int64_t ts,
             float    tx_rate  = _stat_tx  / s;
             float    ack_rate = ack_snap   / s;
             int      ob       = esp_mqtt_client_get_outbox_size(_mqttClient);
-            // QoS 0 has no PUBACKs — ACK count is meaningless there,
-            // so the lag warning only applies at QoS 1.
-            if (qos == 1 && ack_snap < _stat_tx)
+            // QoS 0 has no PUBACKs — ACK count is meaningless there, so the lag
+            // warning only applies at QoS 1 and 2 (for QoS 2 the "ACK" is the PUBCOMP,
+            // which esp-mqtt reports as MQTT_EVENT_PUBLISHED). The messages still in flight
+            // at the end of the window are always missing, so only a real shortfall
+            // (ACKs below 90 % of the messages sent) counts as lagging.
+            if (qos >= 1 && (uint64_t)ack_snap * 10u < (uint64_t)_stat_tx * 9u)
                 ESP_LOGW(TAG, "MQTT flow [%.0fs]: TX=%.1f ACK=%.1f msg/s outbox=%d B — broker lagging",
                          s, tx_rate, ack_rate, ob);
-            else if (qos == 1)
-                ESP_LOGD(TAG, "MQTT flow [%.0fs]: TX=%.1f ACK=%.1f msg/s outbox=%d B OK",
-                         s, tx_rate, ack_rate, ob);
+            else if (qos >= 1)
+                ESP_LOGD(TAG, "MQTT flow [%.0fs]: TX=%.1f ACK=%.1f msg/s outbox=%d B OK (QoS %u)",
+                         s, tx_rate, ack_rate, ob, (unsigned)qos);
             else
                 ESP_LOGD(TAG, "MQTT flow [%.0fs]: TX=%.1f msg/s outbox=%d B (QoS 0)",
                          s, tx_rate, ob);
@@ -363,7 +391,7 @@ bool IoTIs::send_data_internal(const std::string &tag, double value, int64_t ts,
 
 /* Runs on the MQTT client's own task, which dispatches events while holding
  * esp-mqtt's internal API lock for the whole loop iteration. App tasks hold
- * _lock while calling esp_mqtt_client_enqueue()/get_outbox_size() (which block
+ * _lock while calling esp_mqtt_client_publish()/get_outbox_size() (which block
  * on that same API lock), so if this handler ever blocked on _lock the two
  * tasks would deadlock each other permanently (ABBA). Hence: atomics and
  * _cb_lock only in here — never _lock. */
@@ -598,18 +626,17 @@ bool IoTIs::update_job_status(JobFlatBuffers::JobT &job)
 
     std::string topic = "devices/" + _accessToken + "/job_from_device";
 
-    int msg_id = esp_mqtt_client_enqueue(
+    int msg_id = esp_mqtt_client_publish(
         _mqttClient,
         topic.c_str(),
         reinterpret_cast<const char *>(_builder.GetBufferPointer()),
         _builder.GetSize(),
         1,
-        0,
-        true);
+        0);
 
     if (msg_id < 0)
     {
-        ESP_LOGW(TAG, "MQTT job update enqueue failed: msg_id=%d heap=%lu outbox=%d",
+        ESP_LOGW(TAG, "MQTT job update publish failed: msg_id=%d heap=%lu outbox=%d",
                  msg_id,
                  esp_get_free_heap_size(),
                  esp_mqtt_client_get_outbox_size(_mqttClient));
@@ -636,20 +663,19 @@ bool IoTIs::publish_json(const char *topic_suffix, const char *json)
     std::string topic = "devices/" + _accessToken + "/" + topic_suffix;
     int len = (int)strlen(json);
 
-    int msg_id = esp_mqtt_client_enqueue(
+    int msg_id = esp_mqtt_client_publish(
         _mqttClient,
         topic.c_str(),
         json,
         len,
         1,
-        0,
-        true);
+        0);
 
     xSemaphoreGive(_lock);
 
     if (msg_id < 0)
     {
-        ESP_LOGW(TAG, "publish_json enqueue failed: msg_id=%d", msg_id);
+        ESP_LOGW(TAG, "publish_json publish failed: msg_id=%d", msg_id);
         return false;
     }
     return true;

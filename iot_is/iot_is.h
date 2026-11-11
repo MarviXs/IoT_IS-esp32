@@ -50,8 +50,12 @@ public:
      * 0 — fire and forget: no PUBACK; message leaves the outbox as soon as
      *     it is written to the socket. Lowest overhead, no delivery guarantee.
      * 1 — at least once: message waits in the outbox until the broker PUBACKs.
+     * 2 — exactly once: four-way handshake (PUBREC/PUBREL/PUBCOMP), so twice the
+     *     round trips of QoS 1 and the message stays in the outbox longer. On a slow
+     *     link the 8 KB outbox fills sooner and samples are dropped earlier.
      *
-     * Job status updates and publish_json always use QoS 1 regardless.
+     * Values above 2 are clamped to 2. Job status updates and publish_json always
+     * use QoS 1 regardless.
      * Takes effect from the next message; safe to call at any time.
      */
     void set_qos(uint8_t qos);
@@ -102,7 +106,7 @@ private:
     std::atomic<uint32_t>   _stat_ack;          // PUBACKs received (lock-free, MQTT task)
     int64_t                 _stat_reset_us;     // window start (under _lock)
 
-    // Telemetry QoS (0 or 1). Atomic so setters need not take _lock.
+    // Telemetry QoS (0, 1 or 2). Atomic so setters need not take _lock.
     std::atomic<uint8_t>    _qos;
 
     bool ensure_client_created_locked();
